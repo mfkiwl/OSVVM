@@ -17,20 +17,23 @@
 --
 --  Revision History:
 --    Date      Version    Description
---    11/1999:  0.1        Initial revision
---                         Numerous revisions for VHDL Testbenches and Verification
---    10/2013   2013.10    Split out Text Utilities
---    11/2016   2016.11    First Public Release Version
---                         Updated naming for consistency.
+--    02/2021   2021.02    Added AckType, RdyType, RequestTransaction, WaitForTransaction for AckType/RdyType
+--    12/2020   2020.12    Added IfElse functions for string and integer.
+--                         Added Increment function for integer
+--    01/2020   2020.01    Updated Licenses to Apache
+--    08/2018   2018.08    Updated WaitForTransaction to allow 0 time transactions
 --    04/2018   2018.04    Added RequestTransaction, WaitForTransaction, Toggle, WaitForToggle for bit.
 --                         Added Increment and WaitForToggle for integer.
---    08/2018   2018.08    Updated WaitForTransaction to allow 0 time transactions
---    01/2020   2020.01    Updated Licenses to Apache
+--    11/2016   2016.11    First Public Release Version
+--                         Updated naming for consistency.
+--    10/2013   2013.10    Split out Text Utilities
+--    11/1999:  0.1        Initial revision
+--                         Numerous revisions for VHDL Testbenches and Verification
 --
 --
 --  This file is part of OSVVM.
 --  
---  Copyright (c) 1999 - 2020 by SynthWorks Design Inc.  
+--  Copyright (c) 1999 - 2021 by SynthWorks Design Inc.  
 --  
 --  Licensed under the Apache License, Version 2.0 (the "License");
 --  you may not use this file except in compliance with the License.
@@ -51,6 +54,7 @@ library ieee ;
 library osvvm ; 
   use osvvm.AlertLogPkg.all ;
   use osvvm.TranscriptPkg.all ; 
+  use osvvm.ResolutionPkg.all ; 
 
 package TbUtilPkg is
 
@@ -67,31 +71,41 @@ package TbUtilPkg is
   function OneHot ( constant A : in std_logic_vector ) return boolean ;  
   function ZeroOneHot ( constant A : in std_logic_vector ) return boolean ;  
 
+  ------------------------------------------------------------
+  -- IfElse
+  --   Crutch until VHDL-2019 conditional initialization
+  --   If condition is true return first parameter otherwise return second
+  ------------------------------------------------------------
+  function IfElse(Expr : boolean ; A, B : std_logic_vector) return std_logic_vector ; 
+  function IfElse(Expr : boolean ; A, B : integer) return integer ; 
 
   ------------------------------------------------------------
-  -- RequestTransaction
-  --   Transaction initiation side of handshaking
-  --   Pairs with WaitForTransaction or one of its variations
+  -- RequestTransaction - WaitForTransaction
+  --   RequestTransaction - Transaction initiation in transaction procedure
+  --   WaitForTransaction - Transaction execution control in VC
+  ------------------------------------------------------------
+  ------------------------------------------------------------
+  -- RequestTransaction - WaitForTransaction
+  --   std_logic
   ------------------------------------------------------------
   procedure RequestTransaction (
     signal Rdy  : Out std_logic ;
     signal Ack  : In  std_logic 
   ) ;
-
-  procedure RequestTransaction (
-    signal Rdy  : Out bit ;
-    signal Ack  : In  bit 
-  ) ;
   
-  ------------------------------------------------------------
-  -- WaitForTransaction
-  --   Model side of handshaking
-  --   Pairs with RequestTransaction 
-  ------------------------------------------------------------
   procedure WaitForTransaction (
     signal Clk  : In  std_logic ;
     signal Rdy  : In  std_logic ;
     signal Ack  : Out std_logic 
+  ) ;
+  
+  ------------------------------------------------------------
+  -- RequestTransaction - WaitForTransaction
+  --   bit
+  ------------------------------------------------------------
+  procedure RequestTransaction (
+    signal Rdy  : Out bit ;
+    signal Ack  : In  bit 
   ) ;
   
   procedure WaitForTransaction (
@@ -99,7 +113,30 @@ package TbUtilPkg is
     signal Rdy  : In  bit ;
     signal Ack  : Out bit 
   ) ;
+  
+  ------------------------------------------------------------
+  -- RequestTransaction - WaitForTransaction
+  --   integer
+  ------------------------------------------------------------
+  subtype RdyType is resolved_max integer range  0 to integer'high ; 
+  subtype AckType is resolved_max integer range -1 to integer'high ; 
+  
+  procedure RequestTransaction (
+    signal Rdy     : InOut RdyType ;
+    signal Ack     : In    AckType 
+  ) ;
 
+  procedure WaitForTransaction (
+    signal Clk      : In    std_logic ;
+    signal Rdy      : In    RdyType ;
+    signal Ack      : InOut AckType 
+  ) ;
+  
+  ------------------------------------------------------------
+  -- WaitForTransaction
+  --   Specializations for interrupt handling
+  --   Currently only std_logic based
+  ------------------------------------------------------------
   procedure WaitForTransaction (
     signal   Clk       : In  std_logic ;
     signal   Rdy       : In  std_logic ;
@@ -153,6 +190,7 @@ package TbUtilPkg is
   
   -- Integer type versions
   procedure Increment ( signal Sig : InOut integer ; constant RollOverValue : in integer := 0) ;
+  function  Increment (constant Sig : in integer ; constant Amount : in integer := 1) return integer ;
   procedure WaitForToggle ( signal Sig : In integer ) ;
 
 
@@ -259,7 +297,6 @@ package TbUtilPkg is
   -- Backward compatible name  
   alias SyncToClk is WaitForClock [std_logic, time] ;
 
-
   ------------------------------------------------------------
   -- Deprecated
   -- WaitForAck, StrobeAck
@@ -309,9 +346,36 @@ package body TbUtilPkg is
 
 
   ------------------------------------------------------------
-  -- RequestTransaction
-  --   Transaction initiation side of handshaking
-  --   Pairs with WaitForTransaction or one of its variations
+  -- IfElse
+  --   Crutch until VHDL-2019 conditional initialization
+  --   If condition is true return first parameter otherwise return second
+  ------------------------------------------------------------
+  function IfElse(Expr : boolean ; A, B : std_logic_vector) return std_logic_vector is 
+  begin
+    if Expr then 
+      return A ; 
+    else
+      return B ; 
+    end if ; 
+  end function IfElse ; 
+
+  function IfElse(Expr : boolean ; A, B : integer) return integer is 
+  begin
+    if Expr then 
+      return A ; 
+    else
+      return B ; 
+    end if ; 
+  end function IfElse ; 
+
+  ------------------------------------------------------------
+  -- RequestTransaction - WaitForTransaction
+  --   RequestTransaction - Transaction initiation in transaction procedure
+  --   WaitForTransaction - Transaction execution control in VC
+  ------------------------------------------------------------
+  ------------------------------------------------------------
+  -- RequestTransaction - WaitForTransaction
+  --   std_logic
   ------------------------------------------------------------
   procedure RequestTransaction (
     signal Rdy  : Out std_logic ;
@@ -327,28 +391,7 @@ package body TbUtilPkg is
     -- Transaction Done
     wait until Ack = '1' ;        
   end procedure RequestTransaction ;
-
-  procedure RequestTransaction (
-    signal Rdy  : Out bit ;
-    signal Ack  : In  bit 
-  ) is
-  begin
-    -- Record contains new transaction
-    Rdy        <= '1' ;
-    -- Find Ack low = '0' 
-    wait until Ack = '0' ;
-    -- Prepare for Next Transaction
-    Rdy        <= '0' ;
-    -- Transaction Done
-    wait until Ack = '1' ;        
-  end procedure RequestTransaction ;
-
-
-  ------------------------------------------------------------
-  -- WaitForTransaction
-  --   Model side of handshaking
-  --   Pairs with RequestTransaction 
-  ------------------------------------------------------------
+  
   procedure WaitForTransaction (
     signal Clk  : In  std_logic ;
     signal Rdy  : In  std_logic ;
@@ -372,7 +415,26 @@ package body TbUtilPkg is
     Ack        <= '0' ;               --  #3
     wait for 0 ns ; -- Allow transactions without time passing
   end procedure WaitForTransaction ;
-
+  
+  ------------------------------------------------------------
+  -- RequestTransaction - WaitForTransaction
+  --   bit
+  ------------------------------------------------------------
+  procedure RequestTransaction (
+    signal Rdy  : Out bit ;
+    signal Ack  : In  bit 
+  ) is
+  begin
+    -- Record contains new transaction
+    Rdy        <= '1' ;
+    -- Find Ack low = '0' 
+    wait until Ack = '0' ;
+    -- Prepare for Next Transaction
+    Rdy        <= '0' ;
+    -- Transaction Done
+    wait until Ack = '1' ;        
+  end procedure RequestTransaction ;
+  
   procedure WaitForTransaction (
     signal Clk  : In  std_logic ;
     signal Rdy  : In  bit ;
@@ -399,12 +461,54 @@ package body TbUtilPkg is
     wait for 0 ns ; -- Allow transactions without time passing
   end procedure WaitForTransaction ;
   
+  ------------------------------------------------------------
+  -- RequestTransaction - WaitForTransaction
+  --   integer
+  ------------------------------------------------------------
+  procedure RequestTransaction (
+    signal Rdy     : InOut RdyType ;
+    signal Ack     : In    AckType 
+  ) is
+  begin
+    -- Initiate Transaction Request
+    Rdy <= Increment(Rdy) ; 
+    wait for 0 ns ; 
+    
+    -- Wait for Transaction Completion
+    wait until Rdy = Ack ;     
+  end procedure RequestTransaction ;
+
+  procedure WaitForTransaction (
+    signal Clk      : In    std_logic ;
+    signal Rdy      : In    RdyType ;
+    signal Ack      : InOut AckType 
+  ) is
+    variable AckTime : time ; 
+  begin
+    -- End of Previous Cycle.  Signal Done
+    Ack <= Increment(Ack) ; 
+    AckTime    := NOW ; 
+    
+    -- Find Start of Transaction
+    wait until Ack /= Rdy ; 
+
+    -- Align to clock if needed (not back-to-back transactions)
+    if NOW /= AckTime then 
+      wait until Clk = CLK_ACTIVE ;
+    end if ; 
+  end procedure WaitForTransaction ;
+  
+  ------------------------------------------------------------
+  -- WaitForTransaction
+  --   Specializations for interrupt handling
+  --   Currently only std_logic based
+  ------------------------------------------------------------
   procedure WaitForTransaction (
     signal   Clk       : In  std_logic ;
     signal   Rdy       : In  std_logic ;
     signal   Ack       : Out std_logic ;
     signal   TimeOut   : In  std_logic ;
-    constant Polarity  : In std_logic := '1' 
+    constant Polarity  : In  std_logic := '1' 
   ) is
     variable AckTime : time ; 
     variable FoundRdy : boolean ; 
@@ -586,14 +690,20 @@ package body TbUtilPkg is
   end procedure WaitForToggle ;
   
   -- Integer type versions
-  procedure Increment ( signal Sig : InOut integer ; constant RollOverValue : in integer := 0) is
+  procedure Increment (signal Sig : InOut integer ; constant RollOverValue : in integer := 0) is
   begin
-    if Sig = integer'high then 
+--!!    if Sig = integer'high then 
+    if Sig = 2**30-1 then -- for consistency with function increment
       Sig <= RollOverValue ; 
     else
       Sig <= Sig + 1 ;
     end if ; 
   end procedure Increment ;
+
+  function Increment (constant Sig : in integer ; constant Amount : in integer := 1) return integer is
+  begin
+    return (Sig + Amount) mod 2**30 ; 
+  end function Increment ;
   
   procedure WaitForToggle ( signal Sig : In integer ) is
   begin
@@ -647,10 +757,11 @@ package body TbUtilPkg is
     variable result : integer := 0 ; 
   begin
     for i in s'RANGE loop
-      if s(i) /= integer'left then 
-        result := s(i) + result;
-      else 
-        result := s(i) + 1;  -- removes the initialization requirement
+--      if s(i) /= integer'left then 
+--        result := result + s(i);
+--      else 
+      if s(i) /= 0 then 
+        result := result + 1;  -- removes the initialization requirement
       end if ;
     end loop ;
     return result ; 
@@ -923,4 +1034,3 @@ package body TbUtilPkg is
 
 
 end TbUtilPkg ;
-
